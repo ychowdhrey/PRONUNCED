@@ -1,0 +1,63 @@
+# Eval — Pre Video (Workflow B)
+
+**When this runs:** *after* the automatic word + respelling generation, *before* video production.
+**What it does:** verifies the answer card (the `[TA-puhs]`-style respelling) actually says the word correctly.
+**Nature:** unlike Workflow A, the three core checks **cannot be verified by a script** — a script can gate spelling and syllable counts, but it cannot *hear* whether `[SAL-mon]` is wrong. These need a human ear or a TTS read-back. One automated pre-check (encoding) runs first.
+**Decision rule:** a card ships only if it clears the encoding pre-check **and** all three ear checks.
+
+---
+
+## Required input files
+
+| File | Used by | Why it's needed |
+|---|---|---|
+| `generated-cards.csv` (or `.json`) | everything | Output of the generation step: each row = word + its respelling, and the audio file path if audio already exists. |
+| Ground-truth pronunciation source (Wiktionary IPA / Cambridge / Forvo) | B1–B3 | Lets you semi-automate: compare each generated respelling to a reference and route only mismatches to a human ear. Without it, **every** card needs a human ear and B becomes the bottleneck. |
+| (the cards file itself) | Encoding pre-check | The pre-check only reads the text — no other input required. |
+
+---
+
+## Step 0 — Encoding pre-check (automated, on the file)
+
+This is the **one part of B a machine fully owns.** It needs no pronunciation knowledge — it just scans bytes.
+
+- Flag any row containing mojibake or non-UTF-8 artifacts: `Ã`, `Â`, the replacement char `�`, or any character outside the expected set.
+- Catches broken titles like `pÃ¢tÃ©` (should be *pâté*) and `gew rz` (the `ü` dropped out of *gewürztraminer*).
+- Runs in one regex pass over the whole file before any human looks at it.
+- **Reason code:** `ENCODING_BROKEN` → send back to fix the text; do not proceed to ear checks until clean.
+
+> Note: a respelling that's just the word retyped in caps — `[QUINCE]`, `[GHEE]`, `[NAHN]` — is **not** a B failure. It's a sign a single-syllable word slipped past gate **A1**. Reject it back to A, don't try to fix it here.
+
+---
+
+## The three ear checks (per card)
+
+All three answer the same question: *does the respelling produce the correct spoken word?*
+
+| ID | Check | Fails when | Example |
+|---|---|---|---|
+| B1 | **Right sounds** | a phoneme is wrong | `salmon` → `[SAL-mon]` (the L is silent: SAM-uhn); `bruschetta` → `[broo-SHET-tah]` (sch = "sk": broo-SKEH-tah) | `WRONG_SOUND` |
+| B2 | **Right stress** | the caps sit on the wrong syllable | `halloumi` → `[HAL-loo-mee]` (it's huh-LOO-mee); `persimmon` → `[PER-sim-mon]` (per-SIM-uhn) | `WRONG_STRESS` |
+| B3 | **Right syllable count** | a syllable is dropped or added | `nigiri` → `[ni-GREE]` (nee-GEE-ree); `camembert` → `[CAM-uh-muh-bair]` (extra syllable) | `WRONG_SYLLABLES` |
+
+---
+
+## How to run B (realistic design)
+
+Because the three checks are ear-based and B runs after generation:
+
+1. **Encoding pre-check** (automated) → clean the file.
+2. **Reference diff** (semi-automated, if you have a ground-truth source) → compare each generated respelling to the dictionary pronunciation; auto-pass clear matches, route only mismatches forward.
+3. **Ear confirmation** (human or TTS read-back) → TTS speaks the bracket aloud; reviewer listens and checks B1–B3 against the real word; pass/fail each.
+
+**If there is no ground-truth source:** skip step 2 — every card goes to step 3. That's the slow path, so securing a reference source is the single biggest lever on B's throughput.
+
+---
+
+## Output
+
+- **Approved cards** → proceed to video production.
+- **Failed cards** → tagged with reason code(s):
+  - `ENCODING_BROKEN` → fix text, re-run Step 0
+  - `WRONG_SOUND` / `WRONG_STRESS` / `WRONG_SYLLABLES` → regenerate or hand-correct the respelling, re-run ear checks
+  - a caps-echo card → return to Workflow A (it failed A1)
