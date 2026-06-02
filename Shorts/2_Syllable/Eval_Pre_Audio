@@ -1,0 +1,56 @@
+# Eval — Pre Audio (Workflow A)
+
+**When this runs:** on each candidate word, *before* it enters audio generation.
+**What it does:** decides whether a word qualifies for the syllable-stress scene format.
+**Nature:** six objective pass/fail gates. No subjective "is it tricky?" judgment — fully scriptable, and a second person (or a script) runs it the same way you would.
+**Decision rule:** a word qualifies only if it passes **all six** gates. One fail = rejected (or rerouted, see A1).
+
+---
+
+## Required input files
+
+| File | Used by | Why it's needed |
+|---|---|---|
+| `candidates.txt` | all gates | The incoming words to screen (one per line). |
+| `master-wordlist.txt` | **A6** | Everything already published or queued. Without it you can't tell if a candidate already exists at the root level. |
+| Syllable/pronunciation dictionary (e.g. CMUdict) | **A1** | To count syllables objectively instead of guessing. |
+| Spelling + entity reference (dictionary + place/name gazetteer, e.g. Wiktionary / Wikipedia) | **A4, A5** | To confirm a string is correctly spelled and is a real word, name, or place. |
+
+If `master-wordlist.txt` is missing, A6 cannot run and the batch should not be processed — duplicates would slip through.
+
+---
+
+## The six gates
+
+| ID | Gate | Passes if | Fails (example) | Reason code |
+|---|---|---|---|---|
+| A1 | **≥ 2 syllables** (2 counts) | word has two or more syllables | `niche`, `route`, `mauve`, `conch` (1 syllable) | `MONOSYLLABIC` |
+| A2 | **One word, not a phrase** | no internal space; single primary stress | `pad thai`, `lo mein`, `et cetera`, `faux pas` | `PHRASE` |
+| A3 | **Said as a word, not spelled out** | pronounced as syllables, not letter-by-letter | `SSH`, `DJI`, `URI`, `ZTE` | `INITIALISM` |
+| A4 | **Correctly spelled** | matches a dictionary/known form | `magna cumme laude`, `cunninglingus` | `MISSPELLED` |
+| A5 | **Real, verifiable term** | is a dictionary word, real name, or real place | `qwertyuiop…`, `pronunciate`, `carchoochie` | `NOT_A_WORD` |
+| A6 | **Not a duplicate (root level)** | not already covered by an existing card | `uighur` when `uyghur` exists | `DUPLICATE` |
+
+---
+
+## Notes on the gates that need a rule, not just a check
+
+**A1 — the boundary.** Two syllables **passes**. Only one-syllable words fail. A failed word is **not deleted** — it routes to the separate single-syllable / sound-based scene format (the "show the sound" treatment for words like *route, niche, slough, scythe*). Reason code `MONOSYLLABIC` should mean "reroute," not "bin."
+
+**A3 — acronym vs initialism.** Reject only strings read out letter-by-letter (`SSH` = "ess-ess-aitch"). **Keep** acronyms said as a word — `JSON` ("jay-son"), `ASCII` ("ask-ee"), `NASA`. A short curated allow-list handles the said-as-a-word cases; everything else all-caps gets flagged for a one-time human ruling, then added to the list.
+
+**A6 — what collapses, what stays.** This is the rule, decided:
+- **Collapse to one card:**
+  - exact repeats (`teriyaki` listed twice)
+  - alternate spellings that sound identical (`uighur` / `uyghur`)
+  - word + locator/descriptor of the same headword (`worcester` / `worcester ma` / `worcester mass`; `oaxaca` / `oaxaca mexico`)
+- **Keep as separate cards (do NOT collapse):**
+  - distinct inflected or derived forms — `cache` / `cached`, `slough` / `sloughed`, `diagnosis` / `diagnoses`, `fascism` / `fascist`
+  - rationale: each is its own dictionary entry, and the inflection can add a real trap (`diagnoses` → "-seez"). This matches the completeness goal.
+
+---
+
+## Output
+
+- **Pass list** → proceed to audio generation.
+- **Reject list** → each word tagged with its reason code(s). `MONOSYLLABIC` items go to the other workflow; the rest are held or fixed.
